@@ -4,6 +4,7 @@ const dotenv = require('dotenv');
 const app = express();
 const port = process.env.port || 5000;
 dotenv.config();
+const stripe = require('stripe')(process.env.STRIPE_SECRETE);
 const jwt = require('jsonwebtoken');
 
 // middleware 
@@ -36,7 +37,7 @@ async function run() {
     const menuCollection = client.db("hungryBees").collection("menu");
     const reviewCollection = client.db("hungryBees").collection("review");
     const cartCollection = client.db("hungryBees").collection("cart");
-
+    const paymentCollection = client.db("hungryBees").collection("payment");
 
     //veryfy token middleware 
     const verifyToken = (req, res, next) => {
@@ -79,6 +80,7 @@ async function run() {
       const result = await menuCollection.findOne(query);
       console.log(result);
       res.send(result);
+
     })
     app.patch('/menu/:id', async (req, res) => {
       const item = req.body;
@@ -177,6 +179,38 @@ async function run() {
       const result = await cartCollection.deleteOne(query);
       res.send(result);
     })
+    //payment
+    app.post('/create-payment-intent', async (req, res) => {
+      const { price } = req.body;
+      const amount = parseInt(price * 100);
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: amount,
+        currency: 'usd',
+        payment_method_types: ['card'],
+      });
+      res.send({
+        clientSecret: paymentIntent.client_secret
+      })
+    })
+    app.get('/payments/:email',verifyToken, async(req,res)=>{
+      const email = req.params.email;
+      const query = {email:email};
+      const result = await paymentCollection.find().toArray();
+      res.send(result);
+    })
+    app.post('/payments', async (req, res) => {
+      const payment = req.body;
+      const paymentResult = await paymentCollection.insertOne(payment);
+      // delete item from cart 
+      const query = {
+        _id: {
+          $in: payment.cartIds.map(id => new ObjectId(id))
+        }
+      }
+      const deleteResult = await cartCollection.deleteMany(query);
+      res.send({paymentResult,deleteResult});
+    })
+
 
 
     // Send a ping to confirm a successful connection
